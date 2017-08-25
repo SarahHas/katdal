@@ -839,6 +839,55 @@ class DataSet(object):
         self.compscan_indices = sorted(set(self.sensor['Observation/compscan_index']))
         self.target_indices = sorted(set(self.sensor['Observation/target_index']))
 
+    def step(self,time_step=60):
+        """Generator that iterates through the dataset in time steps.
+
+        This iterates through the currently selected list of scans, returning
+        the scan index, scan state and associated target object. In addition,
+        after each iteration the data set will reflect the scan selection, i.e.
+        the timestamps, visibilities, sensor values, etc. will be those of the
+        current scan. The scan selection applies on top of any existing
+        selection.
+
+        time_step is the time in seconds to step by. This is riunded up to
+        the nearest dump boundery.
+
+        Yields
+        ------
+        dump : array of int
+            array of dump indexes
+        state : string
+            Scan state
+        target : :class:`katpoint.Target` object
+            Target associated with scan
+
+        """
+        dumps = self.dumps[:]
+        # This is the active selection onto which scan selection will be added
+        preselection = dict(self._selection.items())
+        # This will ensure that the original selection is properly restored
+        preselection['reset'] = 'T'
+        old_timekeep = self._time_keep.copy()
+        state_data = self.sensor.get('Observation/scan_state')[:]
+        dump_group = []
+        num_dumps = np.ceil(time_step/self.dump_period).astype(int)
+        #print range(dumps[0],dumps[-1],num_dumps)
+        for dump in range(dumps[0],dumps[-1],num_dumps):
+            a =  (dumps >= dump) * (dumps < dump+num_dumps)
+            if a.sum() > 0 :
+                dump_group.append(dumps[a])
+        for dump in dump_group:
+            # Add scan selection on top of existing selection
+            self.select(dumps=dump, reset='')
+            state = np.unique(state_data[dump])
+            target = self.catalogue.targets[self.target_indices[0]]
+            yield dump, state, target
+            # A quick way to reset the time selection to the original one
+            self._set_keep(old_timekeep.copy())
+            self._selection.pop('dumps', None)
+        # Restore original selection more thoroughly
+        self.select(**preselection)
+
     def scans(self):
         """Generator that iterates through scans in data set.
 
